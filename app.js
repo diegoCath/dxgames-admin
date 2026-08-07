@@ -1,6 +1,12 @@
 const API_BASE = "https://api.dxgames.eu";
 const RETURN_TO = "https://admin.dxgames.eu/";
 const PLATFORMS = ["iOS", "Android", "Steam"];
+const ANALYTICS_DATE_RANGE_OPTIONS = [
+  { value: "", label: "All time" },
+  { value: "24h", label: "Last 24 hours" },
+  { value: "7d", label: "Last 7 days" },
+  { value: "30d", label: "Last 30 days" }
+];
 const ANALYTICS_PLAYER_XP_OPTIONS = [
   { value: "", label: "All players" },
   { value: "new", label: "New players" },
@@ -41,12 +47,13 @@ const state = {
   versions: null,
   scheduled: null,
   analytics: null,
-  analyticsVersion: "",
-  analyticsOutcome: "",
-  analyticsPlayerXp: "",
-  analyticsMainDeadlands: "",
-  analyticsMainEdge: "",
-  analyticsBoss: "",
+  analyticsVersion: [],
+  analyticsOutcome: [],
+  analyticsPlayerXp: [],
+  analyticsDateRange: "",
+  analyticsMainDeadlands: [],
+  analyticsMainEdge: [],
+  analyticsBoss: [],
   analyticsOutcomeOptions: [],
   analyticsLoading: false,
   analyticsError: "",
@@ -117,6 +124,93 @@ function buildOutcomeFilterOptions(outcomes) {
   }
 
   return options;
+}
+
+function optionsWithoutAll(options) {
+  return options.filter((option) => option.value !== "");
+}
+
+function selectedValuesSummary(options, selected, allLabel) {
+  if (!selected.length) return allLabel;
+  if (selected.length === 1) {
+    return options.find((option) => option.value === selected[0])?.label ?? selected[0];
+  }
+  return `${selected.length} selected`;
+}
+
+function renderMultiSelectFilter(label, allLabel, options, selected, field) {
+  const choices = optionsWithoutAll(options);
+  const selectedSet = new Set(selected);
+  const summary = selectedValuesSummary(choices, selected, allLabel);
+  return `
+    <div class="field">
+      <span>${escapeHtml(label)}</span>
+      <details class="multi-select">
+        <summary>${escapeHtml(summary)}</summary>
+        <div class="multi-select__menu">
+          ${choices.map((option) => `
+            <label>
+              <input
+                type="checkbox"
+                data-field="${escapeHtml(field)}"
+                value="${escapeHtml(option.value)}"
+                ${selectedSet.has(option.value) ? "checked" : ""}
+              >
+              <span>${escapeHtml(option.label)}</span>
+            </label>
+          `).join("")}
+          ${selected.length ? `<button type="button" data-action="clear-filter" data-field="${escapeHtml(field)}">Clear</button>` : ""}
+        </div>
+      </details>
+    </div>
+  `;
+}
+
+function selectedValuesForField(field) {
+  switch (field) {
+    case "analytics-version":
+      return state.analyticsVersion;
+    case "analytics-outcome":
+      return state.analyticsOutcome;
+    case "analytics-player-xp":
+      return state.analyticsPlayerXp;
+    case "analytics-main-deadlands":
+      return state.analyticsMainDeadlands;
+    case "analytics-main-edge":
+      return state.analyticsMainEdge;
+    case "analytics-boss":
+      return state.analyticsBoss;
+    default:
+      return [];
+  }
+}
+
+function setSelectedValuesForField(field, values) {
+  switch (field) {
+    case "analytics-version":
+      state.analyticsVersion = values;
+      state.analyticsOutcome = [];
+      break;
+    case "analytics-outcome":
+      state.analyticsOutcome = values;
+      break;
+    case "analytics-player-xp":
+      state.analyticsPlayerXp = values;
+      break;
+    case "analytics-main-deadlands":
+      state.analyticsMainDeadlands = values;
+      break;
+    case "analytics-main-edge":
+      state.analyticsMainEdge = values;
+      break;
+    case "analytics-boss":
+      state.analyticsBoss = values;
+      break;
+  }
+}
+
+function appendSelectedParams(params, key, values) {
+  values.forEach((value) => params.append(key, value));
 }
 
 async function apiFetch(path, init = {}) {
@@ -209,16 +303,29 @@ async function mockApiFetch(path, init = {}) {
   }
   if (path.startsWith("/stx/admin/analytics/summary")) {
     const url = new URL(path, "https://mock.local");
-    const deathAct = url.searchParams.get("death_act");
-    const playerXp = url.searchParams.get("player_xp") || "";
-    const mainDeadlands = url.searchParams.get("main_deadlands") || "";
-    const mainEdge = url.searchParams.get("main_edge") || "";
-    const boss = url.searchParams.get("boss") || "";
-    const selectedFilters = [playerXp, mainDeadlands, mainEdge, boss].filter(Boolean).length;
+    const deathActs = url.searchParams.getAll("death_act");
+    const appVersions = url.searchParams.getAll("app_version");
+    const playerXps = url.searchParams.getAll("player_xp");
+    const mainDeadlands = url.searchParams.getAll("main_deadlands");
+    const mainEdges = url.searchParams.getAll("main_edge");
+    const bosses = url.searchParams.getAll("boss");
+    const dateRange = url.searchParams.get("date_range") || "";
+    const selectedFilters = [
+      ...appVersions,
+      ...playerXps,
+      ...mainDeadlands,
+      ...mainEdges,
+      ...bosses,
+      dateRange
+    ].filter(Boolean).length;
+    const averageFactor = (values, factors) =>
+      values.length ? values.reduce((sum, value) => sum + (factors[value] ?? 1), 0) / values.length : 1;
+    const versionFactors = { "1.3.0": 0.9, "1.2.4": 0.72, "1.2.3": 0.58 };
     const xpFactors = { new: 0.42, beginner: 0.56, intermediate: 0.72, expert: 0.88 };
     const deadlandsFactors = { ooze: 0.84, skelechonk: 0.68, banshee: 0.56, ghost: 0.46 };
     const edgeFactors = { rats: 0.74, spiders: 0.62, necros: 0.5, armored: 0.44 };
     const bossFactors = { vampire: 0.78, lich: 0.64, gargoyle: 0.52, shadow: 0.4 };
+    const dateFactors = { "24h": 0.3, "7d": 0.62, "30d": 0.84 };
     const baseOutcomes = [
       { key: "survived", label: "Survived", count: 14 },
       { key: "death_act_1", label: "Died · Deadlands", count: 9 },
@@ -226,29 +333,31 @@ async function mockApiFetch(path, init = {}) {
       { key: "death_act_3", label: "Died · Mausoleum", count: 8 }
     ];
     const allOutcomes = baseOutcomes.map((row, index) => {
-      const xpFactor = xpFactors[playerXp] ?? 1;
-      const deadlandsFactor = deadlandsFactors[mainDeadlands] ?? 1;
-      const edgeFactor = edgeFactors[mainEdge] ?? 1;
-      const bossFactor = bossFactors[boss] ?? 1;
+      const versionFactor = averageFactor(appVersions, versionFactors);
+      const xpFactor = averageFactor(playerXps, xpFactors);
+      const deadlandsFactor = averageFactor(mainDeadlands, deadlandsFactors);
+      const edgeFactor = averageFactor(mainEdges, edgeFactors);
+      const bossFactor = averageFactor(bosses, bossFactors);
+      const dateFactor = dateFactors[dateRange] ?? 1;
       const rowVariance = selectedFilters ? 1 + index * 0.08 : 1;
       const count = Math.max(
         selectedFilters ? 1 : 0,
-        Math.round(row.count * xpFactor * deadlandsFactor * edgeFactor * bossFactor * rowVariance)
+        Math.round(row.count * versionFactor * xpFactor * deadlandsFactor * edgeFactor * bossFactor * dateFactor * rowVariance)
       );
       return { ...row, count };
     });
-    const outcomes = deathAct === null
+    const outcomes = deathActs.length === 0
       ? allOutcomes
       : allOutcomes.filter((row) => {
         const value = outcomeKeyToDeathAct(row.key);
-        return deathAct === "dead" ? value !== "-1" : value === deathAct;
+        return deathActs.some((deathAct) => deathAct === "dead" ? value !== "-1" : value === deathAct);
       });
     const count = outcomes.reduce((sum, row) => sum + row.count, 0);
     const popularScale = count > 0 ? Math.max(0.18, count / 42) : 0;
     const scaleCount = (value) => Math.max(count > 0 ? 1 : 0, Math.round(value * popularScale));
     return {
       count,
-      average_time: Math.max(42, (deathAct === null ? 118.42 : 104.6) - selectedFilters * 9.5),
+      average_time: Math.max(42, (deathActs.length === 0 ? 118.42 : 104.6) - selectedFilters * 9.5),
       outcomes,
       popular_weapons: [
         { id: 20, label: "Sparkling Spell", count: scaleCount(18) },
@@ -415,33 +524,35 @@ function renderAnalyticsPanel() {
         <p class="muted">Summary from <code>/stx/admin/analytics/summary</code>.</p>
       </div>
       <div class="analytics-filters">
+        ${renderMultiSelectFilter(
+          "App version",
+          "All versions",
+          appVersions.map((version) => ({ value: version, label: version })),
+          state.analyticsVersion,
+          "analytics-version"
+        )}
+        ${renderMultiSelectFilter(
+          "Outcome",
+          "All outcomes",
+          buildOutcomeFilterOptions(outcomeOptions).map((outcome) => ({
+            value: outcome.value,
+            label: `${outcome.label ?? outcome.key} (${outcome.count ?? 0})`
+          })),
+          state.analyticsOutcome,
+          "analytics-outcome"
+        )}
+        ${renderMultiSelectFilter(
+          "Player XP",
+          "All players",
+          ANALYTICS_PLAYER_XP_OPTIONS,
+          state.analyticsPlayerXp,
+          "analytics-player-xp"
+        )}
         <label class="field">
-          <span>App version</span>
-          <select class="select" data-field="analytics-version">
-            <option value="">All versions</option>
-            ${appVersions.map((version) => `
-              <option value="${escapeHtml(version)}" ${version === state.analyticsVersion ? "selected" : ""}>${escapeHtml(version)}</option>
-            `).join("")}
-          </select>
-        </label>
-        <label class="field">
-          <span>Outcome</span>
-          <select class="select" data-field="analytics-outcome">
-            <option value="">All outcomes</option>
-            ${buildOutcomeFilterOptions(outcomeOptions).map((outcome) => {
-              return `
-                <option value="${escapeHtml(outcome.value)}" ${outcome.value === state.analyticsOutcome ? "selected" : ""}>
-                  ${escapeHtml(outcome.label ?? outcome.key)} (${escapeHtml(outcome.count ?? 0)})
-                </option>
-              `;
-            }).join("")}
-          </select>
-        </label>
-        <label class="field">
-          <span>Player XP</span>
-          <select class="select" data-field="analytics-player-xp">
-            ${ANALYTICS_PLAYER_XP_OPTIONS.map((option) => `
-              <option value="${escapeHtml(option.value)}" ${option.value === state.analyticsPlayerXp ? "selected" : ""}>
+          <span>Date</span>
+          <select class="select" data-field="analytics-date-range">
+            ${ANALYTICS_DATE_RANGE_OPTIONS.map((option) => `
+              <option value="${escapeHtml(option.value)}" ${option.value === state.analyticsDateRange ? "selected" : ""}>
                 ${escapeHtml(option.label)}
               </option>
             `).join("")}
@@ -449,36 +560,27 @@ function renderAnalyticsPanel() {
         </label>
         <fieldset class="filter-group">
           <legend>Main enemies</legend>
-          <label class="field">
-            <span>Main Deadlands</span>
-            <select class="select" data-field="analytics-main-deadlands">
-              ${ANALYTICS_MAIN_DEADLANDS_OPTIONS.map((option) => `
-                <option value="${escapeHtml(option.value)}" ${option.value === state.analyticsMainDeadlands ? "selected" : ""}>
-                  ${escapeHtml(option.label)}
-                </option>
-              `).join("")}
-            </select>
-          </label>
-          <label class="field">
-            <span>Main Edge</span>
-            <select class="select" data-field="analytics-main-edge">
-              ${ANALYTICS_MAIN_EDGE_OPTIONS.map((option) => `
-                <option value="${escapeHtml(option.value)}" ${option.value === state.analyticsMainEdge ? "selected" : ""}>
-                  ${escapeHtml(option.label)}
-                </option>
-              `).join("")}
-            </select>
-          </label>
-          <label class="field">
-            <span>Boss</span>
-            <select class="select" data-field="analytics-boss">
-              ${ANALYTICS_BOSS_OPTIONS.map((option) => `
-                <option value="${escapeHtml(option.value)}" ${option.value === state.analyticsBoss ? "selected" : ""}>
-                  ${escapeHtml(option.label)}
-                </option>
-              `).join("")}
-            </select>
-          </label>
+          ${renderMultiSelectFilter(
+            "Main Deadlands",
+            "All Deadlands mains",
+            ANALYTICS_MAIN_DEADLANDS_OPTIONS,
+            state.analyticsMainDeadlands,
+            "analytics-main-deadlands"
+          )}
+          ${renderMultiSelectFilter(
+            "Main Edge",
+            "All Edge mains",
+            ANALYTICS_MAIN_EDGE_OPTIONS,
+            state.analyticsMainEdge,
+            "analytics-main-edge"
+          )}
+          ${renderMultiSelectFilter(
+            "Boss",
+            "All bosses",
+            ANALYTICS_BOSS_OPTIONS,
+            state.analyticsBoss,
+            "analytics-boss"
+          )}
         </fieldset>
       </div>
     </div>
@@ -604,39 +706,32 @@ async function loadAnalytics() {
   renderShell();
   try {
     const baseParams = new URLSearchParams();
-    if (state.analyticsVersion) {
-      baseParams.set("app_version", state.analyticsVersion);
+    appendSelectedParams(baseParams, "app_version", state.analyticsVersion);
+    appendSelectedParams(baseParams, "player_xp", state.analyticsPlayerXp);
+    if (state.analyticsDateRange) {
+      baseParams.set("date_range", state.analyticsDateRange);
     }
-    if (state.analyticsPlayerXp) {
-      baseParams.set("player_xp", state.analyticsPlayerXp);
-    }
-    if (state.analyticsMainDeadlands) {
-      baseParams.set("main_deadlands", state.analyticsMainDeadlands);
-    }
-    if (state.analyticsMainEdge) {
-      baseParams.set("main_edge", state.analyticsMainEdge);
-    }
-    if (state.analyticsBoss) {
-      baseParams.set("boss", state.analyticsBoss);
-    }
+    appendSelectedParams(baseParams, "main_deadlands", state.analyticsMainDeadlands);
+    appendSelectedParams(baseParams, "main_edge", state.analyticsMainEdge);
+    appendSelectedParams(baseParams, "boss", state.analyticsBoss);
 
     const optionsSummary = await apiFetch(analyticsSummaryPath(baseParams));
     state.analyticsOutcomeOptions = Array.isArray(optionsSummary.outcomes) ? optionsSummary.outcomes : [];
-    const outcomeOptions = buildOutcomeFilterOptions(state.analyticsOutcomeOptions);
-    const outcomeIsAvailable = outcomeOptions.some((option) => option.value === state.analyticsOutcome);
+    const availableOutcomeValues = new Set(buildOutcomeFilterOptions(state.analyticsOutcomeOptions).map((option) => option.value));
+    const availableOutcomes = state.analyticsOutcome.filter((outcome) => availableOutcomeValues.has(outcome));
+    if (availableOutcomes.length !== state.analyticsOutcome.length) {
+      state.analyticsOutcome = availableOutcomes;
+    }
 
-    if (state.analyticsOutcome && outcomeIsAvailable) {
+    if (state.analyticsOutcome.length) {
       const filteredParams = new URLSearchParams(baseParams);
-      filteredParams.set("death_act", state.analyticsOutcome);
+      appendSelectedParams(filteredParams, "death_act", state.analyticsOutcome);
       const filteredSummary = await apiFetch(analyticsSummaryPath(filteredParams));
       state.analytics = {
         ...filteredSummary,
         app_versions: Array.isArray(optionsSummary.app_versions) ? optionsSummary.app_versions : filteredSummary.app_versions
       };
     } else {
-      if (state.analyticsOutcome && !outcomeIsAvailable) {
-        state.analyticsOutcome = "";
-      }
       state.analytics = optionsSummary;
     }
     state.analyticsLoading = false;
@@ -699,6 +794,11 @@ app.addEventListener("click", (event) => {
   if (action === "signout") void signOut();
   if (action === "reload-versions") void loadVersions();
   if (action === "reload-analytics") void loadAnalytics();
+  if (action === "clear-filter") {
+    setSelectedValuesForField(target.dataset.field, []);
+    renderShell();
+    void loadAnalytics();
+  }
   if (tab) {
     state.activeTab = tab;
     renderShell();
@@ -718,29 +818,18 @@ app.addEventListener("submit", (event) => {
 app.addEventListener("change", (event) => {
   if (!(event.target instanceof Element)) return;
   const target = event.target;
-  if (target?.dataset?.field === "analytics-version") {
-    state.analyticsVersion = target.value;
-    state.analyticsOutcome = "";
+  const field = target?.dataset?.field;
+  if (target instanceof HTMLInputElement && target.type === "checkbox" && field?.startsWith("analytics-")) {
+    const selected = selectedValuesForField(field);
+    const nextValues = target.checked
+      ? [...selected, target.value]
+      : selected.filter((value) => value !== target.value);
+    setSelectedValuesForField(field, nextValues);
+    renderShell();
     void loadAnalytics();
   }
-  if (target?.dataset?.field === "analytics-outcome") {
-    state.analyticsOutcome = target.value;
-    void loadAnalytics();
-  }
-  if (target?.dataset?.field === "analytics-player-xp") {
-    state.analyticsPlayerXp = target.value;
-    void loadAnalytics();
-  }
-  if (target?.dataset?.field === "analytics-main-deadlands") {
-    state.analyticsMainDeadlands = target.value;
-    void loadAnalytics();
-  }
-  if (target?.dataset?.field === "analytics-main-edge") {
-    state.analyticsMainEdge = target.value;
-    void loadAnalytics();
-  }
-  if (target?.dataset?.field === "analytics-boss") {
-    state.analyticsBoss = target.value;
+  if (target instanceof HTMLSelectElement && field === "analytics-date-range") {
+    state.analyticsDateRange = target.value;
     void loadAnalytics();
   }
 });
