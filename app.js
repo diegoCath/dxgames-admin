@@ -277,6 +277,11 @@ async function apiFetch(path, init = {}) {
     error.status = response.status;
     throw error;
   }
+  if (payload === null) {
+    const error = new Error(`Expected JSON from ${path}.`);
+    error.status = response.status;
+    throw error;
+  }
   return payload;
 }
 
