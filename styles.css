@@ -490,6 +490,63 @@ button {
   background: var(--bar-color, var(--accent));
 }
 
+.squeaks-chart {
+  width: 100%;
+  height: 280px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.squeaks-chart svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.squeaks-chart__grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.squeaks-chart__tick {
+  fill: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.squeaks-chart__line {
+  fill: none;
+  stroke: var(--series-color, var(--accent));
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.squeaks-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.squeaks-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.squeaks-legend i {
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: var(--series-color, var(--accent));
+}
+
 .json-grid {
   display: grid;
   gap: 10px;

@@ -7,6 +7,15 @@ const ANALYTICS_DATE_RANGE_OPTIONS = [
   { value: "7d", label: "Last 7 days" },
   { value: "30d", label: "Last 30 days" }
 ];
+const SQUEAKS_DATE_RANGE_OPTIONS = [
+  { value: "24h", label: "Last 24 hours" },
+  { value: "7d", label: "Last 7 days" },
+  { value: "30d", label: "Last 30 days" }
+];
+const SQUEAKS_INTERVAL_OPTIONS = [
+  { value: "day", label: "Day" },
+  { value: "hour", label: "Hour" }
+];
 const ANALYTICS_PLAYER_XP_OPTIONS = [
   { value: "", label: "All players" },
   { value: "new", label: "New players" },
@@ -57,6 +66,16 @@ const state = {
   analyticsOutcomeOptions: [],
   analyticsLoading: false,
   analyticsError: "",
+  squeaks: null,
+  squeaksTags: [],
+  squeaksTagSelectionInitialized: false,
+  squeaksInterval: "day",
+  squeaksDateRange: "7d",
+  squeaksPlatforms: [],
+  squeaksAppVersions: [],
+  squeaksPlayerXp: [],
+  squeaksLoading: false,
+  squeaksError: "",
   versionsLoading: false,
   versionsError: "",
   saveStatus: "idle",
@@ -180,6 +199,14 @@ function selectedValuesForField(field) {
       return state.analyticsMainEdge;
     case "analytics-boss":
       return state.analyticsBoss;
+    case "squeaks-tags":
+      return state.squeaksTags;
+    case "squeaks-platforms":
+      return state.squeaksPlatforms;
+    case "squeaks-app-versions":
+      return state.squeaksAppVersions;
+    case "squeaks-player-xp":
+      return state.squeaksPlayerXp;
     default:
       return [];
   }
@@ -206,11 +233,28 @@ function setSelectedValuesForField(field, values) {
     case "analytics-boss":
       state.analyticsBoss = values;
       break;
+    case "squeaks-tags":
+      state.squeaksTags = values;
+      state.squeaksTagSelectionInitialized = true;
+      break;
+    case "squeaks-platforms":
+      state.squeaksPlatforms = values;
+      break;
+    case "squeaks-app-versions":
+      state.squeaksAppVersions = values;
+      break;
+    case "squeaks-player-xp":
+      state.squeaksPlayerXp = values;
+      break;
   }
 }
 
 function appendSelectedParams(params, key, values) {
   values.forEach((value) => params.append(key, value));
+}
+
+function loadForFilterField(field) {
+  return field?.startsWith("squeaks-") ? loadSqueaks() : loadAnalytics();
 }
 
 async function apiFetch(path, init = {}) {
@@ -299,6 +343,62 @@ async function mockApiFetch(path, init = {}) {
         PLATFORMS.map((platform) => [platform, { live_version: body.platforms[platform].live_version }])
       ),
       live_updated_at: new Date().toISOString()
+    };
+  }
+  if (path.startsWith("/stx/admin/squeaks/summary")) {
+    const url = new URL(path, "https://mock.local");
+    const interval = url.searchParams.get("interval") || "day";
+    const dateRange = url.searchParams.get("date_range") || "7d";
+    const tags = url.searchParams.getAll("tag");
+    const platforms = url.searchParams.getAll("platform");
+    const appVersions = url.searchParams.getAll("app_version");
+    const playerXps = url.searchParams.getAll("player_xp");
+    const rangeHours = dateRange === "24h" ? 24 : dateRange === "30d" ? 24 * 30 : 24 * 7;
+    const stepHours = interval === "hour" ? 1 : 24;
+    const to = new Date("2026-08-10T12:00:00.000Z");
+    const from = new Date(to.getTime() - rangeHours * 60 * 60 * 1000);
+    const allTags = [
+      { tag: "first_session", count: 48 },
+      { tag: "tutorial_finished", count: 31 },
+      { tag: "boss_seen", count: 19 },
+      { tag: "store_opened", count: 16 },
+      { tag: "daily_started", count: 12 },
+      { tag: "settings_opened", count: 7 }
+    ];
+    const filterScale =
+      (platforms.length ? 0.78 : 1) *
+      (appVersions.length ? 0.7 : 1) *
+      (playerXps.length ? 0.65 : 1);
+    const tagOptions = allTags.map((row) => ({
+      tag: row.tag,
+      count: Math.max(1, Math.round(row.count * filterScale))
+    }));
+    const buckets = [];
+    for (const cursor = new Date(from); cursor <= to; cursor.setUTCHours(cursor.getUTCHours() + stepHours)) {
+      const bucket = new Date(cursor);
+      if (interval === "day") bucket.setUTCHours(0, 0, 0, 0);
+      buckets.push(bucket.toISOString());
+    }
+    const selectedTags = tags.length ? tags : [];
+    const series = selectedTags.map((tag, tagIndex) => ({
+      tag,
+      points: buckets.map((bucket, index) => {
+        const wave = Math.max(0, Math.sin((index + tagIndex) / 2.2));
+        const base = Math.max(1, Math.round((tagOptions.find((row) => row.tag === tag)?.count ?? 5) / buckets.length));
+        return {
+          bucket,
+          count: Math.max(0, Math.round((base + wave * (tagIndex + 2)) * filterScale))
+        };
+      })
+    }));
+    return {
+      count: series.reduce((total, row) => total + row.points.reduce((sum, point) => sum + point.count, 0), 0),
+      interval,
+      range: { from: from.toISOString(), to: to.toISOString() },
+      series,
+      tag_options: tagOptions,
+      platforms: ["Android", "iOS", "Steam"],
+      app_versions: ["1.3.0", "1.2.4", "1.2.3"]
     };
   }
   if (path.startsWith("/stx/admin/analytics/summary")) {
@@ -420,9 +520,16 @@ function renderShell() {
     <nav class="tabs" aria-label="Admin sections">
       <button class="tab ${state.activeTab === "versions" ? "is-active" : ""}" type="button" data-tab="versions">Versions</button>
       <button class="tab ${state.activeTab === "analytics" ? "is-active" : ""}" type="button" data-tab="analytics">Analytics</button>
+      <button class="tab ${state.activeTab === "squeaks" ? "is-active" : ""}" type="button" data-tab="squeaks">Squeaks</button>
     </nav>
     <main class="panel">
-      ${state.activeTab === "versions" ? renderVersionsPanel() : renderAnalyticsPanel()}
+      ${
+        state.activeTab === "versions"
+          ? renderVersionsPanel()
+          : state.activeTab === "analytics"
+            ? renderAnalyticsPanel()
+            : renderSqueaksPanel()
+      }
     </main>
   `;
 }
@@ -596,6 +703,89 @@ function renderAnalyticsPanel() {
   `;
 }
 
+function renderSqueaksPanel() {
+  if (state.squeaksLoading) {
+    return `<p class="state">Loading squeaks...</p>`;
+  }
+  if (state.squeaksError) {
+    return `
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">Squeaks</p>
+          <h2 class="panel-title">Squeak events</h2>
+        </div>
+        <button class="button button--ghost" type="button" data-action="reload-squeaks">Retry</button>
+      </div>
+      <p class="state state--error">${escapeHtml(state.squeaksError)}</p>
+    `;
+  }
+  if (!state.squeaks) {
+    return `<p class="state">No squeaks loaded.</p>`;
+  }
+
+  const summary = state.squeaks;
+  const tagOptions = Array.isArray(summary.tag_options) ? summary.tag_options : [];
+  const platformOptions = Array.isArray(summary.platforms) ? summary.platforms.map((platform) => ({ value: platform, label: platform })) : [];
+  const appVersionOptions = Array.isArray(summary.app_versions)
+    ? summary.app_versions.map((version) => ({ value: version, label: version }))
+    : [];
+  const selectedDateLabel = labelForOption(SQUEAKS_DATE_RANGE_OPTIONS, state.squeaksDateRange);
+  const tagTotals = tagTotalsFromSeries(summary.series);
+  const noTagsAvailable = tagOptions.length === 0;
+  const noTagsSelected = !noTagsAvailable && state.squeaksTags.length === 0;
+
+  return `
+    <div class="analytics-toolbar">
+      <div>
+        <p class="eyebrow">Squeaks</p>
+        <h2 class="panel-title">Squeak events</h2>
+        <p class="muted">Summary from <code>/stx/admin/squeaks/summary</code>.</p>
+      </div>
+      <div class="analytics-filters">
+        ${renderMultiSelectFilter(
+          "Tag",
+          "All tags",
+          tagOptions.map((option) => ({ value: option.tag, label: `${option.tag} (${option.count ?? 0})` })),
+          state.squeaksTags,
+          "squeaks-tags"
+        )}
+        <label class="field">
+          <span>Interval</span>
+          <select class="select" data-field="squeaks-interval">
+            ${SQUEAKS_INTERVAL_OPTIONS.map((option) => `
+              <option value="${escapeHtml(option.value)}" ${option.value === state.squeaksInterval ? "selected" : ""}>
+                ${escapeHtml(option.label)}
+              </option>
+            `).join("")}
+          </select>
+        </label>
+        <label class="field">
+          <span>Date</span>
+          <select class="select" data-field="squeaks-date-range">
+            ${SQUEAKS_DATE_RANGE_OPTIONS.map((option) => `
+              <option value="${escapeHtml(option.value)}" ${option.value === state.squeaksDateRange ? "selected" : ""}>
+                ${escapeHtml(option.label)}
+              </option>
+            `).join("")}
+          </select>
+        </label>
+        ${renderMultiSelectFilter("Platform", "All platforms", platformOptions, state.squeaksPlatforms, "squeaks-platforms")}
+        ${renderMultiSelectFilter("App version", "All versions", appVersionOptions, state.squeaksAppVersions, "squeaks-app-versions")}
+        ${renderMultiSelectFilter("Player XP", "All players", ANALYTICS_PLAYER_XP_OPTIONS, state.squeaksPlayerXp, "squeaks-player-xp")}
+      </div>
+    </div>
+    <div class="stat-grid">
+      <div class="stat"><span>Squeaks</span><strong>${escapeHtml(summary.count ?? 0)}</strong></div>
+      <div class="stat"><span>Selected tags</span><strong>${escapeHtml(state.squeaksTags.length)}</strong></div>
+      <div class="stat"><span>Window</span><strong>${escapeHtml(selectedDateLabel)}</strong></div>
+    </div>
+    ${noTagsAvailable ? `<p class="state">No squeak tags found for this filter.</p>` : ""}
+    ${noTagsSelected ? `<p class="callout">Select one or more tags to show squeak series data.</p>` : ""}
+    ${renderSqueaksSeriesChart(summary)}
+    ${renderBarSection("Tag breakdown", tagTotals, summary.count)}
+  `;
+}
+
 function clampPercent(value) {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, value));
@@ -610,6 +800,103 @@ function barColorForPercent(value) {
 function analyticsSummaryPath(params) {
   const query = params.toString();
   return `/stx/admin/analytics/summary${query ? `?${query}` : ""}`;
+}
+
+function squeaksSummaryPath(params) {
+  const query = params.toString();
+  return `/stx/admin/squeaks/summary${query ? `?${query}` : ""}`;
+}
+
+function labelForOption(options, value) {
+  return options.find((option) => option.value === value)?.label ?? value;
+}
+
+function tagTotalsFromSeries(series) {
+  if (!Array.isArray(series)) return [];
+  return series.map((row) => ({
+    key: row.tag,
+    label: row.tag,
+    count: Array.isArray(row.points)
+      ? row.points.reduce((total, point) => total + (Number(point.count) || 0), 0)
+      : 0
+  }));
+}
+
+function renderSqueaksSeriesChart(summary) {
+  const series = Array.isArray(summary.series) ? summary.series : [];
+  if (!series.length) {
+    return `
+      <section class="analytics-section">
+        <h3>Squeaks over time</h3>
+        <p class="state">Select one or more tags to show a time series.</p>
+      </section>
+    `;
+  }
+
+  const width = 760;
+  const height = 280;
+  const pad = { top: 18, right: 18, bottom: 38, left: 48 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const maxCount = Math.max(
+    ...series.flatMap((row) => Array.isArray(row.points) ? row.points.map((point) => Number(point.count) || 0) : [0]),
+    1
+  );
+  const colors = ["#57d68d", "#f4b84a", "#ef5f67", "#7cc7ff", "#c084fc"];
+  const firstPoints = Array.isArray(series[0]?.points) ? series[0].points : [];
+  const xForIndex = (index, length) => pad.left + (length <= 1 ? 0 : (index / (length - 1)) * plotWidth);
+  const yForCount = (count) => pad.top + plotHeight - (count / maxCount) * plotHeight;
+  const yTicks = [0, Math.round(maxCount / 2), maxCount];
+  const xTicks = firstPoints.length <= 1
+    ? firstPoints
+    : [firstPoints[0], firstPoints[Math.floor(firstPoints.length / 2)], firstPoints[firstPoints.length - 1]];
+
+  return `
+    <section class="analytics-section">
+      <h3>Squeaks over time</h3>
+      <div class="squeaks-chart" role="img" aria-label="Squeak count by selected tag over time">
+        <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+          ${yTicks.map((tick) => {
+            const y = yForCount(tick);
+            return `
+              <line class="squeaks-chart__grid" x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}"></line>
+              <text class="squeaks-chart__tick" x="${pad.left - 10}" y="${y + 4}" text-anchor="end">${tick}</text>
+            `;
+          }).join("")}
+          ${xTicks.map((point, index) => {
+            const pointIndex = firstPoints.indexOf(point);
+            const x = xForIndex(pointIndex, firstPoints.length);
+            return `
+              <text class="squeaks-chart__tick" x="${x}" y="${height - 10}" text-anchor="${index === 0 ? "start" : index === xTicks.length - 1 ? "end" : "middle"}">
+                ${escapeHtml(formatSqueakBucket(point.bucket, summary.interval))}
+              </text>
+            `;
+          }).join("")}
+          ${series.map((row, index) => {
+            const points = Array.isArray(row.points) ? row.points : [];
+            const polyline = points
+              .map((point, pointIndex) => `${xForIndex(pointIndex, points.length)},${yForCount(Number(point.count) || 0)}`)
+              .join(" ");
+            return `<polyline class="squeaks-chart__line" points="${polyline}" style="--series-color: ${colors[index % colors.length]}"></polyline>`;
+          }).join("")}
+        </svg>
+      </div>
+      <div class="squeaks-legend">
+        ${series.map((row, index) => `
+          <span><i style="--series-color: ${colors[index % colors.length]}"></i>${escapeHtml(row.tag)}</span>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function formatSqueakBucket(iso, interval) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  if (interval === "hour") {
+    return date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", hour12: false, timeZone: "UTC" });
+  }
+  return date.toLocaleString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 function renderBarSection(title, rows, totalRuns) {
@@ -742,6 +1029,50 @@ async function loadAnalytics() {
   renderShell();
 }
 
+async function loadSqueaks() {
+  state.squeaksLoading = true;
+  state.squeaksError = "";
+  renderShell();
+  try {
+    const baseParams = new URLSearchParams();
+    baseParams.set("interval", state.squeaksInterval);
+    baseParams.set("date_range", state.squeaksDateRange);
+    appendSelectedParams(baseParams, "platform", state.squeaksPlatforms);
+    appendSelectedParams(baseParams, "app_version", state.squeaksAppVersions);
+    appendSelectedParams(baseParams, "player_xp", state.squeaksPlayerXp);
+
+    const discovery = await apiFetch(squeaksSummaryPath(baseParams));
+    const tagOptions = Array.isArray(discovery.tag_options) ? discovery.tag_options : [];
+    const availableTags = new Set(tagOptions.map((option) => option.tag));
+    let selectedTags = state.squeaksTags.filter((tag) => availableTags.has(tag));
+
+    if (!state.squeaksTagSelectionInitialized && tagOptions.length > 0) {
+      selectedTags = tagOptions.slice(0, 5).map((option) => option.tag);
+      state.squeaksTagSelectionInitialized = true;
+    }
+    state.squeaksTags = selectedTags;
+
+    if (selectedTags.length > 0) {
+      const filteredParams = new URLSearchParams(baseParams);
+      appendSelectedParams(filteredParams, "tag", selectedTags);
+      const filteredSummary = await apiFetch(squeaksSummaryPath(filteredParams));
+      state.squeaks = {
+        ...filteredSummary,
+        tag_options: tagOptions,
+        platforms: Array.isArray(discovery.platforms) ? discovery.platforms : filteredSummary.platforms,
+        app_versions: Array.isArray(discovery.app_versions) ? discovery.app_versions : filteredSummary.app_versions
+      };
+    } else {
+      state.squeaks = discovery;
+    }
+    state.squeaksLoading = false;
+  } catch (error) {
+    state.squeaksLoading = false;
+    state.squeaksError = error.message || "Unable to load squeaks.";
+  }
+  renderShell();
+}
+
 async function saveVersions(form) {
   const data = new FormData(form);
   const platforms = {};
@@ -794,16 +1125,18 @@ app.addEventListener("click", (event) => {
   if (action === "signout") void signOut();
   if (action === "reload-versions") void loadVersions();
   if (action === "reload-analytics") void loadAnalytics();
+  if (action === "reload-squeaks") void loadSqueaks();
   if (action === "clear-filter") {
     setSelectedValuesForField(target.dataset.field, []);
     renderShell();
-    void loadAnalytics();
+    void loadForFilterField(target.dataset.field);
   }
   if (tab) {
     state.activeTab = tab;
     renderShell();
     if (tab === "versions" && !state.versions && !state.versionsLoading) void loadVersions();
     if (tab === "analytics" && !state.analytics && !state.analyticsLoading) void loadAnalytics();
+    if (tab === "squeaks" && !state.squeaks && !state.squeaksLoading) void loadSqueaks();
   }
 });
 
@@ -819,18 +1152,30 @@ app.addEventListener("change", (event) => {
   if (!(event.target instanceof Element)) return;
   const target = event.target;
   const field = target?.dataset?.field;
-  if (target instanceof HTMLInputElement && target.type === "checkbox" && field?.startsWith("analytics-")) {
+  if (
+    target instanceof HTMLInputElement &&
+    target.type === "checkbox" &&
+    (field?.startsWith("analytics-") || field?.startsWith("squeaks-"))
+  ) {
     const selected = selectedValuesForField(field);
     const nextValues = target.checked
       ? [...selected, target.value]
       : selected.filter((value) => value !== target.value);
     setSelectedValuesForField(field, nextValues);
     renderShell();
-    void loadAnalytics();
+    void loadForFilterField(field);
   }
   if (target instanceof HTMLSelectElement && field === "analytics-date-range") {
     state.analyticsDateRange = target.value;
     void loadAnalytics();
+  }
+  if (target instanceof HTMLSelectElement && field === "squeaks-date-range") {
+    state.squeaksDateRange = target.value;
+    void loadSqueaks();
+  }
+  if (target instanceof HTMLSelectElement && field === "squeaks-interval") {
+    state.squeaksInterval = target.value;
+    void loadSqueaks();
   }
 });
 
