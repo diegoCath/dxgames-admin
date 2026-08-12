@@ -1,5 +1,5 @@
-const API_BASE = "https://api.dxgames.eu";
-const RETURN_TO = "https://admin.dxgames.eu/";
+const API_BASE = "https://api.dxgames.cl";
+const RETURN_TO = "https://admin.dxgames.cl/";
 const PLATFORMS = ["iOS", "Android", "Steam"];
 const ANALYTICS_DATE_RANGE_OPTIONS = [
   { value: "", label: "All time" },
