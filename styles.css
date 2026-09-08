@@ -142,6 +142,13 @@ button {
   margin: 0;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
 .user-box {
   display: flex;
   align-items: center;
@@ -184,6 +191,64 @@ button {
   border-radius: 8px;
   background: var(--surface);
   box-shadow: 0 14px 40px var(--shadow);
+}
+
+.context-home {
+  display: grid;
+  gap: 20px;
+}
+
+.context-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.context-card {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+  min-height: 144px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  box-shadow: none;
+}
+
+.context-card:hover,
+.context-card:focus-visible {
+  border-color: var(--accent);
+  outline: 0;
+  box-shadow: 0 10px 28px var(--shadow);
+}
+
+.context-card img {
+  display: block;
+  width: 96px;
+  height: 96px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.context-card strong,
+.context-card small {
+  display: block;
+}
+
+.context-card strong {
+  font-size: 1.1rem;
+}
+
+.context-card small {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 700;
 }
 
 .panel-header {
@@ -578,6 +643,7 @@ button {
   }
 
   .topbar,
+  .topbar-actions,
   .panel-header,
   .analytics-toolbar {
     display: grid;
@@ -593,8 +659,19 @@ button {
   }
 
   .versions-grid,
+  .context-grid,
   .stat-grid {
     grid-template-columns: 1fr;
+  }
+
+  .context-card {
+    grid-template-columns: 72px minmax(0, 1fr);
+    min-height: 112px;
+  }
+
+  .context-card img {
+    width: 72px;
+    height: 72px;
   }
 
   .panel,

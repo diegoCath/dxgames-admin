@@ -56,6 +56,7 @@ const app = document.querySelector("#app");
 
 const state = {
   user: null,
+  activeContext: null,
   activeTab: "versions",
   versions: null,
   scheduled: null,
@@ -581,6 +582,8 @@ async function signOut() {
     await apiFetch("/stx/admin/auth/logout", { method: "POST" });
   } finally {
     state.user = null;
+    state.activeContext = null;
+    state.activeTab = "versions";
     renderLogin();
   }
 }
@@ -588,7 +591,7 @@ async function signOut() {
 function renderLogin(message = "") {
   app.innerHTML = `
     <section class="login-panel">
-      <p class="eyebrow">Axaxaxas Admin</p>
+      <p class="eyebrow">DX Games Admin</p>
       <h1>Sign in to continue</h1>
       <p class="muted">Google admin access is required before versions or analytics are shown.</p>
       ${message ? `<p class="state state--error">${escapeHtml(message)}</p>` : ""}
@@ -599,38 +602,76 @@ function renderLogin(message = "") {
 
 function renderShell() {
   const identity = state.user?.name || state.user?.email || "Admin";
+  const selectedContext = state.activeContext === "sepulkrant"
+    ? "Sepulkrant"
+    : state.activeContext === "website"
+      ? "Website"
+      : "";
   app.innerHTML = `
     <header class="topbar">
       <div>
-        <p class="eyebrow">Axaxaxas</p>
+        <p class="eyebrow">${escapeHtml(selectedContext || "DX Games")}</p>
         <h1>Admin Panel</h1>
-        <p class="muted">Manage platform versions and monitor run analytics.</p>
+        <p class="muted">${selectedContext ? `Managing ${escapeHtml(selectedContext)}.` : "Select a context to manage."}</p>
       </div>
-      <div class="user-box">
+      <div class="topbar-actions">
+        ${state.activeContext ? `<button class="button button--ghost" type="button" data-action="change-context">Change context</button>` : ""}
+        <div class="user-box">
         <div>
           <strong>${escapeHtml(identity)}</strong>
           <span class="muted">${escapeHtml(state.user?.email ?? "")}</span>
         </div>
         <button class="button button--secondary" type="button" data-action="signout">Sign out</button>
+        </div>
       </div>
     </header>
-    <nav class="tabs" aria-label="Admin sections">
-      <button class="tab ${state.activeTab === "versions" ? "is-active" : ""}" type="button" data-tab="versions">Versions</button>
-      <button class="tab ${state.activeTab === "analytics" ? "is-active" : ""}" type="button" data-tab="analytics">Analytics</button>
-      <button class="tab ${state.activeTab === "site-analytics" ? "is-active" : ""}" type="button" data-tab="site-analytics">Site analytics</button>
-      <button class="tab ${state.activeTab === "squeaks" ? "is-active" : ""}" type="button" data-tab="squeaks">Squeaks</button>
-    </nav>
+    ${state.activeContext === "sepulkrant" ? `
+      <nav class="tabs" aria-label="Sepulkrant admin sections">
+        <button class="tab ${state.activeTab === "versions" ? "is-active" : ""}" type="button" data-tab="versions">Versions</button>
+        <button class="tab ${state.activeTab === "analytics" ? "is-active" : ""}" type="button" data-tab="analytics">Analytics</button>
+        <button class="tab ${state.activeTab === "squeaks" ? "is-active" : ""}" type="button" data-tab="squeaks">Squeaks</button>
+      </nav>
+    ` : ""}
     <main class="panel">
       ${
-        state.activeTab === "versions"
-          ? renderVersionsPanel()
-          : state.activeTab === "analytics"
-            ? renderAnalyticsPanel()
-            : state.activeTab === "squeaks"
-              ? renderSqueaksPanel()
-              : renderSiteSqueaksPanel()
+        !state.activeContext
+          ? renderContextPicker()
+          : state.activeContext === "website"
+            ? renderSiteSqueaksPanel()
+            : state.activeTab === "versions"
+              ? renderVersionsPanel()
+              : state.activeTab === "analytics"
+                ? renderAnalyticsPanel()
+                : renderSqueaksPanel()
       }
     </main>
+  `;
+}
+
+function renderContextPicker() {
+  return `
+    <div class="context-home">
+      <div>
+        <p class="eyebrow">Contexts</p>
+        <h2 class="panel-title">Choose what to manage</h2>
+      </div>
+      <div class="context-grid">
+        <button class="context-card" type="button" data-action="select-context" data-context="sepulkrant">
+          <img src="assets/context-sepulkrant.png" alt="" width="96" height="96">
+          <span>
+            <strong>Sepulkrant</strong>
+            <small>Versions, analytics, and squeaks</small>
+          </span>
+        </button>
+        <button class="context-card" type="button" data-action="select-context" data-context="website">
+          <img src="apple-touch-icon.png" alt="" width="96" height="96">
+          <span>
+            <strong>Website</strong>
+            <small>Website analytics</small>
+          </span>
+        </button>
+      </div>
+    </div>
   `;
 }
 
@@ -1169,7 +1210,6 @@ async function checkSession() {
     const payload = await apiFetch("/stx/admin/auth/me");
     state.user = payload.user;
     renderShell();
-    await loadVersions();
   } catch (error) {
     state.user = null;
     if (error.status === 401) {
@@ -1389,12 +1429,32 @@ app.addEventListener("click", (event) => {
   if (action === "reload-analytics") void loadAnalytics();
   if (action === "reload-squeaks") void loadSqueaks();
   if (action === "reload-site-squeaks") void loadSiteSqueaks();
+  if (action === "change-context") {
+    state.activeContext = null;
+    state.activeTab = "versions";
+    renderShell();
+  }
+  if (action === "select-context") {
+    const context = target.dataset.context;
+    if (context === "sepulkrant") {
+      state.activeContext = "sepulkrant";
+      state.activeTab = "versions";
+      renderShell();
+      if (!state.versions && !state.versionsLoading) void loadVersions();
+    }
+    if (context === "website") {
+      state.activeContext = "website";
+      renderShell();
+      if (!state.siteSqueaks && !state.siteSqueaksLoading) void loadSiteSqueaks();
+    }
+  }
   if (action === "clear-filter") {
     setSelectedValuesForField(target.dataset.field, []);
     renderShell();
     void loadForFilterField(target.dataset.field);
   }
   if (tab) {
+    if (state.activeContext !== "sepulkrant") return;
     state.activeTab = tab;
     renderShell();
     if (tab === "versions" && !state.versions && !state.versionsLoading) void loadVersions();
