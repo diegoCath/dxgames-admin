@@ -20,6 +20,20 @@ const SITE_EVENT_TYPE_OPTIONS = [
   { value: "view", label: "Views" },
   { value: "action", label: "Actions" }
 ];
+const ADMIN_CONTEXTS = [
+  {
+    key: "sepulkrant",
+    label: "Sepulkrant",
+    icon: "assets/context-sepulkrant.png",
+    description: "Versions, analytics, and squeaks"
+  },
+  {
+    key: "website",
+    label: "Website",
+    icon: "apple-touch-icon.png",
+    description: "Website analytics"
+  }
+];
 const ANALYTICS_PLAYER_XP_OPTIONS = [
   { value: "", label: "All players" },
   { value: "new", label: "New players" },
@@ -169,6 +183,17 @@ function selectedValuesSummary(options, selected, allLabel) {
     return options.find((option) => option.value === selected[0])?.label ?? selected[0];
   }
   return `${selected.length} selected`;
+}
+
+function allowedContexts() {
+  if (Array.isArray(state.user?.contexts)) {
+    return state.user.contexts;
+  }
+  return ADMIN_CONTEXTS.map((context) => context.key);
+}
+
+function canAccessContext(context) {
+  return allowedContexts().includes(context);
 }
 
 function renderMultiSelectFilter(label, allLabel, options, selected, field) {
@@ -330,12 +355,18 @@ async function mockApiFetch(path, init = {}) {
       error.status = 401;
       throw error;
     }
+    const contextMocks = {
+      sepulkrant: ["sepulkrant"],
+      website: ["website"],
+      "no-context": []
+    };
     return {
       user: {
         email: "admin@example.com",
         name: "Admin User",
         picture: null,
-        expires_at: new Date(Date.now() + 3600_000).toISOString()
+        expires_at: new Date(Date.now() + 3600_000).toISOString(),
+        contexts: contextMocks[LOCAL_MOCK] ?? ADMIN_CONTEXTS.map((context) => context.key)
       }
     };
   }
@@ -649,6 +680,19 @@ function renderShell() {
 }
 
 function renderContextPicker() {
+  const contexts = ADMIN_CONTEXTS.filter((context) => canAccessContext(context.key));
+  if (contexts.length === 0) {
+    return `
+      <div class="context-home">
+        <div>
+          <p class="eyebrow">Contexts</p>
+          <h2 class="panel-title">No admin contexts available</h2>
+          <p class="muted">Your account is signed in, but it has not been granted access to any dashboard context.</p>
+        </div>
+      </div>
+    `;
+  }
+
   return `
     <div class="context-home">
       <div>
@@ -656,20 +700,15 @@ function renderContextPicker() {
         <h2 class="panel-title">Choose what to manage</h2>
       </div>
       <div class="context-grid">
-        <button class="context-card" type="button" data-action="select-context" data-context="sepulkrant">
-          <img src="assets/context-sepulkrant.png" alt="" width="96" height="96">
-          <span>
-            <strong>Sepulkrant</strong>
-            <small>Versions, analytics, and squeaks</small>
-          </span>
-        </button>
-        <button class="context-card" type="button" data-action="select-context" data-context="website">
-          <img src="apple-touch-icon.png" alt="" width="96" height="96">
-          <span>
-            <strong>Website</strong>
-            <small>Website analytics</small>
-          </span>
-        </button>
+        ${contexts.map((context) => `
+          <button class="context-card" type="button" data-action="select-context" data-context="${escapeHtml(context.key)}">
+            <img src="${escapeHtml(context.icon)}" alt="" width="96" height="96">
+            <span>
+              <strong>${escapeHtml(context.label)}</strong>
+              <small>${escapeHtml(context.description)}</small>
+            </span>
+          </button>
+        `).join("")}
       </div>
     </div>
   `;
@@ -1436,6 +1475,7 @@ app.addEventListener("click", (event) => {
   }
   if (action === "select-context") {
     const context = target.dataset.context;
+    if (!canAccessContext(context)) return;
     if (context === "sepulkrant") {
       state.activeContext = "sepulkrant";
       state.activeTab = "versions";
